@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 import torchvision.transforms as transforms
+import math
 
 from torchvision.ops import DeformConv2d
 from pytorch_lightning import seed_everything
@@ -14,32 +15,31 @@ from torch.utils.data.dataloader import DataLoader
 
 from datasets.burstsr_dataset import BurstSRDataset
 
-
 ############################################################################################
-
 
 # Hyperparameters
 num_epochs = 300
 learning_rate = 3e-4
 batch_size = 1
 
-
 ############################################################################################
 
-
-seed_everything(12)
+seed_everything(13)
 
 #####################################
 
 class LayerNorm(pl.LightningModule):
     def __init__(self):
         super(LayerNorm, self).__init__()
-        # self.dim = dim
 
-    def forward(self, x):
-        std, mean = torch.std_mean(x, dim = (2,3))
-        normalized_x= torch.stack([transforms.Normalize(mean=mean[i], std=std[i])(img) for i, img in enumerate(x)])
-        return normalized_x
+    #normalize across the feature channels for BFA
+    def forward(self, x): 
+        b, f, h, w = x.shape
+        x = rearrange(x, 'b c h w -> b (h w) c' )
+        variance = torch.var(x, dim=-1, keepdim=True)
+        x = x/torch.sqrt(variance + 1e-5)
+        x = rearrange(x, 'b (h w) c -> b c h w', h = h, w = w)
+        return x
 
 ####################################
 # MDTA : Multi-dconv Head Transposed Attention
@@ -110,13 +110,14 @@ class FeedForward(pl.LightningModule):
 class BFA(pl.LightningModule):
     def __init__(self, dim, num_heads, ffn_expansion_factor, stride, bias):
         super(BFA, self).__init__() 
+        self.layer_norm = LayerNorm()
         self.attn = Attention(dim = dim, num_heads=num_heads, stride = stride, bias = bias)
         self.ffn = FeedForward(dim = dim, ffn_expansion_factor=ffn_expansion_factor, bias=bias)
         
     
     def forward(self, x):
-        x = x + self.attn((x))
-        x = x + self.ffn((x))
+        x = x + self.attn(self.layer_norm.forward(x))
+        x = x + self.ffn(self.layer_norm.forward(x))
 
         return x
 
@@ -231,14 +232,14 @@ class EDA(pl.LightningModule):
 
     def forward(self, x):
 
-        print("inside eda   " , x.shape)
+        # print("inside eda   " , x.shape)
         enc1 = self.encoder_level1(x)
-        print("bfa1   " , enc1.shape)
+        # print("bfa1   " , enc1.shape)
 
         enc1 = self.down1(x)
 
         enc2 = self.encoder_level2(enc1)
-        print("bfa2    ", enc2.shape)
+        # print("bfa2    ", enc2.shape)
         enc2 = self.down2(enc2)
 
         enc2 , offset_feat_enc2 = self.alignment2(enc2)
@@ -275,17 +276,19 @@ class Burstormer(pl.LightningModule):
 
         self.merge = nn.Conv2d(num_features, out_channels, kernel_size=3, stride=1, padding=1, bias=bias)
 
-        self.down = nn.Conv2d(in_channels=3, out_channels=3, kernel_size=8, stride=8, padding=3)
+        self.up = nn.PixelShuffle(4)
 
         self.train_loss = nn.L1Loss()
 
     def forward(self, burst):
-        print("burstormer burst shape  ", burst.shape)
+        # print("burstormer burst shape  ", burst.shape)
+        burst = burst[0]
         burst_size = burst.shape[0]
         burst_feat = self.conv1(burst)
-        print("after first conv   " , burst_feat.shape)
+        # print("after first conv   " , burst_feat.shape)
         aligned_burst_feat = self.align(burst_feat)
-        enhanced_img = self.merge(aligned_burst_feat)
+        # enhanced_img = self.merge(aligned_burst_feat)
+        enhanced_img = self.up(aligned_burst_feat)
 
         enhanced_img = (torch.sum(enhanced_img, dim = 0))/burst_size
 
@@ -294,6 +297,8 @@ class Burstormer(pl.LightningModule):
     def training_step(self, train_batch, batch_idx):
         x, y, flow_vectors, meta_info = train_batch
         pred = self.forward(x)
+        # downsample the gt or upsample the pred, before comparision, downsampling factor = 4 is used to 
+        # generate the burst from rgb to raw
         pred = pred.clamp(0.0, 1.0)
         loss = self.train_loss(pred, y)
         self.log('train_loss', loss, on_step=True, on_epoch=True)
@@ -303,19 +308,23 @@ class Burstormer(pl.LightningModule):
         x, y, flow_vectors, meta_info = val_batch
         pred = self.forward(x)
         pred = pred.clamp(0.0, 1.0)
-        loss = self.train_loss(pred, y)
-        self.log('val_loss', loss, on_step=True, on_epoch=True)
-        # return loss
-
-    # def validation_epoch_end(self, outs):
-    #     # outs is a list of whatever you returned in `validation_step`
-    #     PSNR = torch.stack(outs).mean()
-    #     self.log('val_psnr', PSNR, on_step=False, on_epoch=True, prog_bar=True)
+        mse = nn.MSELoss(pred, y)
+        psnr = 20 * math.log10(self.max_value) - 10.0 * mse.log10()
+        return psnr
+        
+    def on_validation_epoch_end(self, validation_step_outputs):
+        #validation_steps_outputs is a list of outputs produced in validation step
+        psnr = torch.stack(validation_step_outputs).mean()
+        self.log('validation_psnr', psnr, on_epoch=True, on_step=False)
 
     def configure_optimizers(self):        
         optimizer = torch.optim.AdamW(self.parameters(), lr=3e-4)
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 300, eta_min=1e-6)            
-        return [optimizer], [lr_scheduler]
+        # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 300, eta_min=1e-6)            
+        return [optimizer] #, [lr_scheduler]
+    
 
-    def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
-        optimizer.zero_grad(set_to_none=True)
+if(__name__ == '__main__'):
+    burst = torch.rand(1, 8, 4, 80, 80)
+    model = Burstormer()
+    out = model.forward(burst)
+    print(out.shape)

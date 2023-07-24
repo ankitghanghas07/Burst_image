@@ -164,9 +164,7 @@ class FeatureAlignment(pl.LightningModule):
         
         offset, mask = self.offset_generation(self.offset_conv(offset_feat))
 
-        # x = x.type(float)
-        # offset = offset.type(float)
-        # mask = mask.type(float)
+        # set precision to 32 before passing to deformable conv.
 
         aligned_features = self.deform(x, offset, mask)
         aligned_features = self.feat_enrich(aligned_features)
@@ -293,12 +291,6 @@ class Burstormer(pl.LightningModule):
         return enhanced_img
     
 
-    # def train_dataloader(self):
-    #     train_loader = torch.utils.data.DataLoader(
-    #         dataset=BurstSRDataset(path, burst_size = 8, split='train') , batch_size=batch_size, num_workers=4, shuffle=True
-    #     )
-    #     return train_loader
-
     def training_step(self, batch, batch_idx):
         burst, gt, meta_info_burst, meta_info_gt, burst_name = batch
         gt = gt[0]
@@ -312,13 +304,6 @@ class Burstormer(pl.LightningModule):
         self.log('train_loss', loss, on_step=True, on_epoch=True, logger=True)
         
         return loss
-    
-    # def val_dataloader(self):
-    #     test_loader = torch.utils.data.DataLoader(
-    #         dataset=BurstSRDataset(path, burst_size = 8, split='val'), batch_size=batch_size, num_workers=4, shuffle=False
-    #     )
-    #     return test_loader
-    
 
     def validation_step(self, batch, batch_idx):
         burst, gt, meta_info_burst, meta_info_gt, burst_name = batch
@@ -334,18 +319,6 @@ class Burstormer(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
         return optimizer
     
-
-# if(__name__ == '__main__'):
-#     logger = TensorBoardLogger("realBurst_logs", name="RealBurstSR")
-#     trainer = Trainer(
-#         fast_dev_run=True,
-#         logger=logger
-#     )
-#     model = Burstormer()
-#     trainer.fit(model)
-
-
-# look for model checkpoints and how to save model learnables
 
 
 

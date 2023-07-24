@@ -60,7 +60,7 @@ checkpoint_callback = ModelCheckpoint(
     save_top_k=3,
     save_last=True,
     dirpath=args.model_dir,
-    filename='model_{epoch:02d}-{val_loss:.2f}'
+    filename='model_{epoch:02d}-{val_psnr:.2f}'
 )
 
 trainer = Trainer(  
@@ -68,11 +68,6 @@ trainer = Trainer(
                 precision=32, # 16 = half, 32 = float, 64 = double
                 gradient_clip_val=0.01,
                 callbacks=[checkpoint_callback],
-                # benchmark=True, # speeds up training by finding optimal algos
-                # deterministic=True,
-                # val_check_interval=0.25,
-                # progress_bar_refresh_rate=100,
-                # profiler="advanced"
             )
 
 trainer.fit(model, train_loader, test_loader)

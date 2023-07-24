@@ -17,6 +17,8 @@ from torch.utils.data.dataloader import DataLoader
 
 log_dir = './logs/Track_2/'
 
+pretrained_burstormer_path = ''
+
 class Args:
     def __init__(self):
         self.path = "./data/burstsr_dataset"
@@ -24,7 +26,7 @@ class Args:
         self.result_dir = log_dir + "results"
         self.batch_size = 1
         # self.num_epochs = 50
-        self.lr = 3e-4
+        self.lr = 1e-4
         self.burst_size = 8
         self.NUM_WORKERS = 4
 args = Args()
@@ -41,28 +43,10 @@ def load_data():
     )
     return train_loader, test_loader
 
-######################################### Load Burstormer ####################################################
-
-# model = Burstormer()
-# model.cuda()
-
-# if not os.path.exists(args.checkpoint_path):
-#     os.makedirs(args.checkpoint_path, exist_ok=True) 
-
-# if os.path.exists(args.checkpoint_path):
-#     best_model_path = checkpoint_callback.best_model_path
-#     model = Burstormer.load_from_checkpoint(args.checkpoint_path)
-# else : 
-#     model = Burstormer()
-
-
 ######################################### Logger ####################################################
 
 logger = TensorBoardLogger(log_dir, name="real_burst_sr")
 
-######################################### Training #######################################################
-
-train_loader, test_loader = load_data()
 
 checkpoint_callback = ModelCheckpoint(
     monitor='val_loss',
@@ -73,13 +57,23 @@ checkpoint_callback = ModelCheckpoint(
     filename='model_{epoch:02d}-{val_loss:.2f}'
 )
 
-# if os.path.exists(args.checkpoint_path):
-#     last_model_path = checkpoint_callback.last_model_path
-#     model = Burstormer.load_from_checkpoint(last_model_path)
-# else : 
-model = Burstormer()
+######################################### Load Burstormer ####################################################
 
-# checkpoint_callback.
+if os.path.exists(args.checkpoint_path):
+    print("Loading from the last checkpoint.")
+    last_model_path = checkpoint_callback.last_model_path
+    model = Burstormer.load_from_checkpoint(last_model_path)
+elif os.path.exists(pretrained_burstormer_path): # path to pretrained Burstormer on synthetic dataset
+    print("Loading the pretrained burstormer on synthetic dataset...")
+    model = Burstormer.load_from_checkpoint(pretrained_burstormer_path)
+else : 
+    print("training from scratch")
+    model = Burstormer()
+
+
+######################################### Training #######################################################
+
+train_loader, test_loader = load_data()
 
 trainer = Trainer(  
                 limit_train_batches=4,
@@ -89,14 +83,8 @@ trainer = Trainer(
                 gradient_clip_val=0.01,
                 callbacks=[checkpoint_callback],
                 logger=logger,
-                # benchmark=True, # speeds up training by finding optimal algos
-                # deterministic=True,
-                # val_check_interval=0.25,
+                benchmark=True, # speeds up training by finding optimal algos
             )
 
 if(__name__ == '__main__'):
-    # if os.path.exists(args.checkpoint_path):
-    #     last_model_path = checkpoint_callback.last_model_path
     trainer.fit(model, train_dataloaders= train_loader, val_dataloaders= test_loader)
-
-# trainer.save_checkpoint(args.checkpoint_path, weights_only=True)

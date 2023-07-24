@@ -48,4 +48,16 @@
 
 # summary(model, input_size=(8, 4, 80, 80))
 
-import sys
+# import sys
+
+import torch
+
+x = torch.randn(2, 3, 30, 30)
+y = torch.randn(2, 3, 30, 30)
+
+z = torch.cat([x, y], dim=1)
+print(z.shape)
+
+# variance = x.var(-1, keepdim = True)
+
+# print(variance.shape)
