@@ -323,8 +323,8 @@ class Burstormer(pl.LightningModule):
         return [optimizer] #, [lr_scheduler]
     
 
-if(__name__ == '__main__'):
-    burst = torch.rand(1, 8, 4, 80, 80)
-    model = Burstormer()
-    out = model.forward(burst)
-    print(out.shape)
+# if(__name__ == '__main__'):
+#     burst = torch.rand(1, 8, 4, 80, 80)
+#     model = Burstormer()
+#     out = model.forward(burst)
+#     print(out.shape)
